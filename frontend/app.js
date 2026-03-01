@@ -94,13 +94,20 @@ function addEdgeToWasm(parentId, childId) {
 
 function setCptWasm(nodeId, probArray) {
     if (!BEngine) return;
-    // Allocate memory in WASM heap
     const bytesPerElement = 4; // float32
-    const ptr = BEngine._malloc(probArray.length * bytesPerElement);
-    BEngine.HEAPF32.set(probArray, ptr / bytesPerElement);
+    const _malloc = BEngine._malloc || BEngine.malloc || (size => BEngine.ccall('malloc', 'number', ['number'], [size]));
+    const _free = BEngine._free || BEngine.free || (ptr => BEngine.ccall('free', 'void', ['number'], [ptr]));
+
+    const ptr = _malloc(probArray.length * bytesPerElement);
+
+    // Create a new Float32Array view directly over the module's WASM memory
+    const memory = BEngine.wasmMemory || BEngine.memory;
+    const buffer = memory ? memory.buffer : BEngine.HEAP8.buffer;
+    const view = new Float32Array(buffer, ptr, probArray.length);
+    view.set(probArray);
 
     BEngine.ccall('set_cpt', 'void', ['string', 'number', 'number'], [nodeId, ptr, probArray.length]);
-    BEngine._free(ptr);
+    _free(ptr);
 }
 
 function setEvidenceWasm(nodeId, stateIndex) {
@@ -110,14 +117,18 @@ function setEvidenceWasm(nodeId, stateIndex) {
 
 function getMarginalsWasm(nodeId) {
     if (!BEngine) return [0, 0];
+    const _malloc = BEngine._malloc || BEngine.malloc || (size => BEngine.ccall('malloc', 'number', ['number'], [size]));
+    const _free = BEngine._free || BEngine.free || (ptr => BEngine.ccall('free', 'void', ['number'], [ptr]));
 
-    const ptr = BEngine._malloc(2 * 4); // 2 floats
+    const ptr = _malloc(2 * 4); // 2 floats
     BEngine.ccall('get_marginals', 'void', ['string', 'number', 'number'], [nodeId, ptr, 2]);
 
-    const res = new Float32Array(BEngine.HEAPF32.buffer, ptr, 2);
-    const output = [res[0], res[1]];
-    BEngine._free(ptr);
+    const memory = BEngine.wasmMemory || BEngine.memory;
+    const buffer = memory ? memory.buffer : BEngine.HEAP8.buffer;
+    const view = new Float32Array(buffer, ptr, 2);
+    const output = [view[0], view[1]];
 
+    _free(ptr);
     return output;
 }
 

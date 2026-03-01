@@ -30,7 +30,7 @@ You must use **Emscripten** to compile the C++ source into the `.wasm` binary th
 1. Install [Emscripten Toolchain](https://emscripten.org/docs/getting_started/downloads.html).
 2. Run the compilation command:
    ```bash
-   emcc src/wrapper.cpp -o frontend/engine.js -O3 -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap']" -s MODULARIZE=1 -s EXPORT_NAME="Module" -std=c++20
+   emcc src/wrapper.cpp -o frontend/engine.js -O3 -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap']" -s EXPORTED_FUNCTIONS="['_malloc','_free']" -s MODULARIZE=1 -s EXPORT_NAME="Module" -std=c++20
    ```
 3. This will generate `engine.js` and `engine.wasm` directly into the `frontend/` directory.
 
