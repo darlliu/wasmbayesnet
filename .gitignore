@@ -30,3 +30,18 @@
 *.exe
 *.out
 *.app
+
+# WebAssembly / Build
+build/
+*.wasm
+*.js
+!frontend/**/*.js
+
+# VS / VSCode
+.vs/
+.vscode/
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
