@@ -42,7 +42,7 @@ Since there are no `node_modules` or dependencies, any static web server will wo
 
 ```bash
 cd frontend
-python -m http.server 8000
+python server.py
 ```
 Then visit `http://localhost:8000/` in your browser.
 
