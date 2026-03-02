@@ -47,6 +47,11 @@ void clear_all_evidence() {
     global_net.clear_evidence();
 }
 
+EMSCRIPTEN_KEEPALIVE
+void clear_network() {
+    global_net.clear_network();
+}
+
 // Since WASM can't easily return vectors, we pass in a pre-allocated pointer from JS
 EMSCRIPTEN_KEEPALIVE
 void get_marginals(const char* node_id, float* out_buffer, int max_length) {

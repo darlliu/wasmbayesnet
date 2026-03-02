@@ -1,0 +1,289 @@
+{
+    "story": {
+        "title": "🔍 Murder at the Manor",
+        "html": "<p><b>The setup:</b> A wealthy lord was murdered! The two suspects are the <i>Nephew</i> (who inherits the fortune) and the <i>Butler</i>.</p><p><b>1. Open Suspect A (Nephew):</b> Notice his guilt probability is naturally higher right now (42%), because he possesses the <i>Motive</i>.</p><p><b>2. Pin the Evidence:</b> The police found Muddy Footprints (Size 11). Click the Muddy Footprints node and pin the evidence to <i>Size 11 (B)</i>. Notice what happens!</p><p><b>3. The Twist:</b> Toggling the footprint instantly clears the Nephew and skyrockets the Butler's probability of guilt to nearly 90%, entirely collapsing the narrative! This is the power of Bayes Networks solving conditional dependence!</p>"
+    },
+    "nodes": [
+        {
+            "id": "n1",
+            "label": "Motive (Inheritance)",
+            "x": 400,
+            "y": 100,
+            "type": "basic",
+            "states": [
+                "True",
+                "False"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                1.0,
+                0.0
+            ]
+        },
+        {
+            "id": "n4",
+            "label": "Murder Weapon Found",
+            "x": 150,
+            "y": 100,
+            "type": "basic",
+            "states": [
+                "Dagger",
+                "Poison"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.5,
+                0.5
+            ]
+        },
+        {
+            "id": "n5",
+            "label": "Alibi A Verified",
+            "x": 100,
+            "y": 250,
+            "type": "basic",
+            "states": [
+                "True",
+                "False"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.1,
+                0.9
+            ]
+        },
+        {
+            "id": "n6",
+            "label": "Alibi B Verified",
+            "x": 700,
+            "y": 250,
+            "type": "basic",
+            "states": [
+                "True",
+                "False"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.1,
+                0.9
+            ]
+        },
+        {
+            "id": "n7",
+            "label": "Muddy Footprints",
+            "x": 250,
+            "y": 550,
+            "type": "complex",
+            "states": [
+                "Size 9 (A)",
+                "Size 11 (B)",
+                "None"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.3,
+                0.3,
+                0.4
+            ]
+        },
+        {
+            "id": "n8",
+            "label": "Witness Statement",
+            "x": 550,
+            "y": 550,
+            "type": "complex",
+            "states": [
+                "Saw Young Man",
+                "Saw Old Man",
+                "Saw Nothing"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.2,
+                0.2,
+                0.6
+            ]
+        },
+        {
+            "id": "n2",
+            "label": "Suspect A (Nephew)",
+            "x": 250,
+            "y": 350,
+            "type": "basic",
+            "states": [
+                "Guilty",
+                "Innocent"
+            ],
+            "edgeCPTs": {
+                "n1": [
+                    [
+                        0.7,
+                        0.3
+                    ],
+                    [
+                        0.1,
+                        0.9
+                    ]
+                ],
+                "n4": [
+                    [
+                        0.5,
+                        0.5
+                    ],
+                    [
+                        0.5,
+                        0.5
+                    ]
+                ],
+                "n5": [
+                    [
+                        0.05,
+                        0.95
+                    ],
+                    [
+                        0.6,
+                        0.4
+                    ]
+                ],
+                "n7": [
+                    [
+                        0.8,
+                        0.2
+                    ],
+                    [
+                        0.05,
+                        0.95
+                    ],
+                    [
+                        0.5,
+                        0.5
+                    ]
+                ],
+                "n8": [
+                    [
+                        0.8,
+                        0.2
+                    ],
+                    [
+                        0.1,
+                        0.9
+                    ],
+                    [
+                        0.5,
+                        0.5
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        },
+        {
+            "id": "n3",
+            "label": "Suspect B (Butler)",
+            "x": 550,
+            "y": 350,
+            "type": "basic",
+            "states": [
+                "Guilty",
+                "Innocent"
+            ],
+            "edgeCPTs": {
+                "n4": [
+                    [
+                        0.7,
+                        0.3
+                    ],
+                    [
+                        0.2,
+                        0.8
+                    ]
+                ],
+                "n6": [
+                    [
+                        0.05,
+                        0.95
+                    ],
+                    [
+                        0.6,
+                        0.4
+                    ]
+                ],
+                "n7": [
+                    [
+                        0.05,
+                        0.95
+                    ],
+                    [
+                        0.85,
+                        0.15
+                    ],
+                    [
+                        0.5,
+                        0.5
+                    ]
+                ],
+                "n8": [
+                    [
+                        0.1,
+                        0.9
+                    ],
+                    [
+                        0.8,
+                        0.2
+                    ],
+                    [
+                        0.5,
+                        0.5
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        }
+    ],
+    "links": [
+        {
+            "source": "n1",
+            "target": "n2",
+            "type": "infers"
+        },
+        {
+            "source": "n4",
+            "target": "n2",
+            "type": "neutral"
+        },
+        {
+            "source": "n4",
+            "target": "n3",
+            "type": "infers"
+        },
+        {
+            "source": "n5",
+            "target": "n2",
+            "type": "negates"
+        },
+        {
+            "source": "n6",
+            "target": "n3",
+            "type": "negates"
+        },
+        {
+            "source": "n7",
+            "target": "n2",
+            "type": "neutral"
+        },
+        {
+            "source": "n7",
+            "target": "n3",
+            "type": "neutral"
+        },
+        {
+            "source": "n8",
+            "target": "n2",
+            "type": "neutral"
+        },
+        {
+            "source": "n8",
+            "target": "n3",
+            "type": "neutral"
+        }
+    ]
+}

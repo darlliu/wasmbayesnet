@@ -20,13 +20,34 @@
         <div class="logo">
             <span class="logo-icon">📊</span>
             <h1>WasmBayesNet</h1>
+            <select id="theme-selector"
+                style="margin-left: 15px; padding: 4px; border-radius: 4px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); cursor: pointer;">
+                <option value="plain" style="color: black;">Classic Theme</option>
+                <option value="redstring" style="color: black;">RedString Theme</option>
+            </select>
         </div>
         <div class="controls">
             <button id="btn-add-basic-node" class="btn primary">Add Basic Node</button>
             <button id="btn-add-complex-node" class="btn primary" style="background-color: #8b5cf6;">Add Complex
                 Node</button>
             <button id="btn-add-edge" class="btn secondary">Add Edge</button>
+            <div class="divider" style="width: 1px; height: 24px; background: rgba(255,255,255,0.2); margin: 0 10px;">
+            </div>
+            <button id="btn-save" class="btn secondary" style="background-color: #059669;">Save Config</button>
+            <button id="btn-load" class="btn secondary" style="background-color: #059669;">Load Config</button>
+            <input type="file" id="file-load" accept=".json" style="display: none;">
+            <button id="btn-export-svg" class="btn secondary" style="background-color: #db2777;">Export Canvas</button>
+            <div class="divider" style="width: 1px; height: 24px; background: rgba(255,255,255,0.2); margin: 0 10px;">
+            </div>
             <button id="btn-clear" class="btn secondary">Clear Canvas</button>
+            <div class="divider" style="width: 1px; height: 24px; background: rgba(255,255,255,0.2); margin: 0 10px;">
+            </div>
+            <select id="demo-loader" class="btn secondary"
+                style="background-color: #f59e0b; color: #1e293b; font-weight: bold; cursor: pointer; padding-right: 25px;">
+                <option value="" disabled selected>📕 Load Demo Scenario</option>
+                <option value="demo_murder.json">🔍 The Detective (Murder Mystery)</option>
+                <option value="demo_poker.json">🃏 Texas Hold'em (River Calculus)</option>
+            </select>
             <div class="engine-status">
                 <div id="wasm-indicator" class="indicator checking"></div>
                 <span id="wasm-text">Loading WASM Engine...</span>
@@ -40,6 +61,17 @@
         <div class="canvas-container">
             <svg id="network-canvas"></svg>
         </div>
+
+        <!-- Floating Story Panel (Left) -->
+        <aside id="story-panel" class="panel left hidden" style="width: 350px;">
+            <div class="panel-header">
+                <h2 id="story-title">Scenario Guide</h2>
+                <button id="btn-close-story" class="btn-icon">✕</button>
+            </div>
+            <div class="panel-content" id="story-content" style="font-size: 0.95rem; line-height: 1.5; padding: 15px;">
+                <!-- Narrative text injected here by JS -->
+            </div>
+        </aside>
 
         <!-- Floating UI Panel (Glassmorphism) -->
         <aside id="properties-panel" class="panel hidden">

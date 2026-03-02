@@ -63,6 +63,12 @@ public:
         }
     }
 
+    // Completely destroys the graph, clearing all memory
+    void clear_network() {
+        nodes_.clear();
+        node_order_.clear();
+    }
+
     // Get a specific node
     std::shared_ptr<Node> get_node(const std::string& id) const {
         auto it = nodes_.find(id);

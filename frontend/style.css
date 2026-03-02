@@ -14,6 +14,76 @@
     --font-family: 'Inter', sans-serif;
 }
 
+/* =========================================
+   V5 Theme: Detective Red String Evidence
+========================================= */
+[data-theme="redstring"] {
+    --bg-dark: #3e2723;
+    /* Dark corkboard brown */
+    --bg-card: rgba(255, 235, 153, 0.95);
+    /* Sticky note yellow */
+    --border-color: rgba(0, 0, 0, 0.3);
+    --text-main: #212121;
+    /* Dark pen ink */
+    --text-muted: #5d4037;
+
+    --accent: #d32f2f;
+    /* Red string/pushpin */
+    --accent-hover: #f44336;
+
+    --true-color: #388e3c;
+    /* Marker green */
+    --false-color: #d32f2f;
+    /* Marker red */
+
+    --font-family: 'Courier New', monospace;
+    /* Typewriter feel */
+}
+
+/* Theme D3 Canvas Overrides */
+[data-theme="redstring"] .canvas-container {
+    background: radial-gradient(circle at center, #5d4037 0%, #3e2723 100%);
+}
+
+/* Plain white polaroids for basic nodes */
+[data-theme="redstring"] .node circle {
+    fill: #f5f5f5 !important;
+    stroke: #757575 !important;
+    stroke-width: 2px !important;
+    filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.5));
+}
+
+/* Yellow sticky notes for complex nodes */
+[data-theme="redstring"] .node rect {
+    fill: #fff59d !important;
+    stroke: none !important;
+    filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.5));
+}
+
+[data-theme="redstring"] .node:hover circle,
+[data-theme="redstring"] .node:hover rect {
+    stroke: #d32f2f !important;
+    stroke-width: 4px !important;
+    filter: drop-shadow(0 0 10px rgba(211, 47, 47, 0.8));
+}
+
+/* Force all edges to be thick red string */
+[data-theme="redstring"] .link {
+    stroke: #d32f2f !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(1px 2px 2px rgba(0, 0, 0, 0.5));
+}
+
+[data-theme="redstring"] .link-marker {
+    fill: #d32f2f !important;
+}
+
+/* UI Panel Adjustments */
+[data-theme="redstring"] .editable-header,
+[data-theme="redstring"] .node text {
+    font-weight: bold;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -263,6 +333,15 @@ h4 {
     pointer-events: none;
 }
 
+.panel.left {
+    left: 20px;
+    right: auto;
+}
+
+.panel.left.hidden {
+    transform: translateX(-120%);
+}
+
 .panel-header {
     padding: 1rem 1.25rem;
     border-bottom: 1px solid var(--border-color);
@@ -293,6 +372,8 @@ h4 {
 
 .panel-content {
     padding: 1.25rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 150px);
 }
 
 .empty-state {

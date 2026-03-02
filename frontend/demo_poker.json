@@ -1,0 +1,297 @@
+{
+    "story": {
+        "title": "🃏 Texas Hold'em River Math",
+        "html": "<p><b>The scenario:</b> You are at the final table in the World Series of Poker. The game is of imperfect information: you know your cards, but not theirs.</p><p><b>1. Inspect the Math:</b> Click <i>Win Probability (Showdown)</i>. Initially, you have a solid 52% chance of winning.</p><p><b>2. The Opponent Bets:</b> Now click <i>Opponent Action (Flop)</i> and observe them by pinning the variable to '<b>Aggressive Bet/Raise</b>'.</p><p><b>3. Watch the Inference:</b> The network instantly recalculates. By betting aggressively, the backend infers a massive spike in their hand strength, plunging your mathematical Win Probability down to 23%! Always fold bad odds.</p>"
+    },
+    "nodes": [
+        {
+            "id": "n1",
+            "label": "My Hole Cards",
+            "x": 100,
+            "y": 100,
+            "type": "complex",
+            "states": [
+                "High Pair (AA/KK)",
+                "Suited Connectors",
+                "Weak Offsuit"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.05,
+                0.15,
+                0.80
+            ]
+        },
+        {
+            "id": "n2",
+            "label": "Opponent Hole Cards",
+            "x": 600,
+            "y": 100,
+            "type": "complex",
+            "states": [
+                "Premium (AA-QQ)",
+                "Strong (AJ+)",
+                "Speculative",
+                "Trash"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.05,
+                0.15,
+                0.30,
+                0.50
+            ]
+        },
+        {
+            "id": "n3",
+            "label": "Flop Texture",
+            "x": 350,
+            "y": 250,
+            "type": "complex",
+            "states": [
+                "Dry (Rainbow/Unconnected)",
+                "Wet (Flush/Straight Draw)",
+                "Paired Board"
+            ],
+            "edgeCPTs": {},
+            "fullCustomCPT": [
+                0.4,
+                0.4,
+                0.2
+            ]
+        },
+        {
+            "id": "n4",
+            "label": "Opponent Action (Flop)",
+            "x": 600,
+            "y": 400,
+            "type": "complex",
+            "states": [
+                "Aggressive Bet/Raise",
+                "Passive Call",
+                "Check/Fold"
+            ],
+            "edgeCPTs": {
+                "n2": [
+                    [
+                        0.8,
+                        0.15,
+                        0.05
+                    ],
+                    [
+                        0.5,
+                        0.4,
+                        0.1
+                    ],
+                    [
+                        0.2,
+                        0.4,
+                        0.4
+                    ],
+                    [
+                        0.1,
+                        0.1,
+                        0.8
+                    ]
+                ],
+                "n3": [
+                    [
+                        0.3,
+                        0.4,
+                        0.3
+                    ],
+                    [
+                        0.6,
+                        0.3,
+                        0.1
+                    ],
+                    [
+                        0.4,
+                        0.4,
+                        0.2
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        },
+        {
+            "id": "n5",
+            "label": "My Hand Strength (Post-Flop)",
+            "x": 100,
+            "y": 400,
+            "type": "complex",
+            "states": [
+                "Nutted (Set/Straight/Flush)",
+                "Top Pair/Good Kicker",
+                "Draw",
+                "Air"
+            ],
+            "edgeCPTs": {
+                "n1": [
+                    [
+                        0.2,
+                        0.5,
+                        0.1,
+                        0.2
+                    ],
+                    [
+                        0.1,
+                        0.2,
+                        0.4,
+                        0.3
+                    ],
+                    [
+                        0.01,
+                        0.09,
+                        0.1,
+                        0.8
+                    ]
+                ],
+                "n3": [
+                    [
+                        0.1,
+                        0.3,
+                        0.1,
+                        0.5
+                    ],
+                    [
+                        0.2,
+                        0.2,
+                        0.4,
+                        0.2
+                    ],
+                    [
+                        0.1,
+                        0.3,
+                        0.1,
+                        0.5
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        },
+        {
+            "id": "n6",
+            "label": "Opponent Strength (Inferred)",
+            "x": 600,
+            "y": 550,
+            "type": "complex",
+            "states": [
+                "Nutted",
+                "Top Pair",
+                "Draw",
+                "Air"
+            ],
+            "edgeCPTs": {
+                "n4": [
+                    [
+                        0.6,
+                        0.3,
+                        0.05,
+                        0.05
+                    ],
+                    [
+                        0.1,
+                        0.3,
+                        0.5,
+                        0.1
+                    ],
+                    [
+                        0.01,
+                        0.04,
+                        0.05,
+                        0.9
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        },
+        {
+            "id": "n7",
+            "label": "Win Probability (Showdown)",
+            "x": 350,
+            "y": 650,
+            "type": "basic",
+            "states": [
+                "Win",
+                "Lose"
+            ],
+            "edgeCPTs": {
+                "n5": [
+                    [
+                        0.95,
+                        0.05
+                    ],
+                    [
+                        0.6,
+                        0.4
+                    ],
+                    [
+                        0.3,
+                        0.7
+                    ],
+                    [
+                        0.05,
+                        0.95
+                    ]
+                ],
+                "n6": [
+                    [
+                        0.05,
+                        0.95
+                    ],
+                    [
+                        0.4,
+                        0.6
+                    ],
+                    [
+                        0.7,
+                        0.3
+                    ],
+                    [
+                        0.95,
+                        0.05
+                    ]
+                ]
+            },
+            "fullCustomCPT": null
+        }
+    ],
+    "links": [
+        {
+            "source": "n2",
+            "target": "n4",
+            "type": "neutral"
+        },
+        {
+            "source": "n3",
+            "target": "n4",
+            "type": "neutral"
+        },
+        {
+            "source": "n1",
+            "target": "n5",
+            "type": "neutral"
+        },
+        {
+            "source": "n3",
+            "target": "n5",
+            "type": "neutral"
+        },
+        {
+            "source": "n4",
+            "target": "n6",
+            "type": "neutral"
+        },
+        {
+            "source": "n5",
+            "target": "n7",
+            "type": "infers"
+        },
+        {
+            "source": "n6",
+            "target": "n7",
+            "type": "negates"
+        }
+    ]
+}

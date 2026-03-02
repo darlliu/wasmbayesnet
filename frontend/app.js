@@ -53,6 +53,14 @@ async function init() {
 
         setupEventListeners();
 
+        // Theme Toggle Setup
+        const themeSelector = document.getElementById('theme-selector');
+        if (themeSelector) {
+            themeSelector.addEventListener('change', (e) => {
+                document.body.dataset.theme = e.target.value;
+            });
+        }
+
         // Add a demo network automatically
         createDemoNetwork();
 
@@ -118,11 +126,10 @@ function setCptWasm(nodeId, probArray) {
 
     const ptr = _malloc(probArray.length * bytesPerElement);
 
-    // Create a new Float32Array view directly over the module's WASM memory
-    const memory = BEngine.wasmMemory || BEngine.memory;
-    const buffer = memory ? memory.buffer : BEngine.HEAP8.buffer;
-    const view = new Float32Array(buffer, ptr, probArray.length);
-    view.set(probArray);
+    // Robustly set values without touching native HEAP memory arrays
+    for (let i = 0; i < probArray.length; i++) {
+        BEngine.setValue(ptr + i * bytesPerElement, probArray[i], 'float');
+    }
 
     BEngine.ccall('set_cpt', 'void', ['string', 'number', 'number'], [nodeId, ptr, probArray.length]);
     _free(ptr);
@@ -133,6 +140,32 @@ function setEvidenceWasm(nodeId, stateIndex) {
     BEngine.ccall('set_evidence', 'void', ['string', 'number'], [nodeId, stateIndex]);
 }
 
+function setEvidenceApp(nodeId, stateIndex) {
+    if (!BEngine) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) node.evidence = stateIndex;
+    setEvidenceWasm(nodeId, stateIndex);
+}
+
+function clearNetworkApp() {
+    if (!BEngine) return;
+    nodes = [];
+    links = [];
+    nodeCounter = 0;
+    selectedNode = null;
+    BEngine.ccall('clear_network', 'void', [], []);
+    const panel = document.getElementById('properties-panel');
+    if (panel) panel.classList.add('hidden');
+    updateGraph();
+}
+
+function clearAllEvidenceApp() {
+    if (!BEngine) return;
+    nodes.forEach(n => n.evidence = -1);
+    BEngine.ccall('clear_all_evidence', 'void', [], []);
+    updateGraph();
+}
+
 function getMarginalsWasm(nodeId) {
     if (!BEngine) return [];
 
@@ -140,17 +173,19 @@ function getMarginalsWasm(nodeId) {
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return [];
     const numStates = node.states.length;
+    const bytesPerElement = 4; // float32 size
 
     const _malloc = BEngine._malloc || BEngine.malloc || (size => BEngine.ccall('malloc', 'number', ['number'], [size]));
     const _free = BEngine._free || BEngine.free || (ptr => BEngine.ccall('free', 'void', ['number'], [ptr]));
 
-    const ptr = _malloc(numStates * 4); // float32 size
+    const ptr = _malloc(numStates * bytesPerElement);
     BEngine.ccall('get_marginals', 'void', ['string', 'number', 'number'], [nodeId, ptr, numStates]);
 
-    const memory = BEngine.wasmMemory || BEngine.memory;
-    const buffer = memory ? memory.buffer : BEngine.HEAP8.buffer;
-    const view = new Float32Array(buffer, ptr, numStates);
-    const output = Array.from(view);
+    // Robustly read float data without touching native HEAP arrays
+    const output = [];
+    for (let i = 0; i < numStates; i++) {
+        output.push(BEngine.getValue(ptr + i * bytesPerElement, 'float'));
+    }
 
     _free(ptr);
     return output;
@@ -853,13 +888,9 @@ function setupEventListeners() {
     }
 
     document.getElementById('btn-clear').addEventListener('click', () => {
-        nodes = [];
-        links = [];
-        nodeCounter = 0;
-        selectedNode = null;
-        if (BEngine) BEngine.ccall('clear_all_evidence', 'void', [], []);
-        updateGraph();
-        document.getElementById('properties-panel').classList.add('hidden');
+        clearNetworkApp();
+        const storyPanel = document.getElementById('story-panel');
+        if (storyPanel) storyPanel.classList.add('hidden');
     });
 
     document.getElementById('btn-close-panel').addEventListener('click', () => {
@@ -867,6 +898,13 @@ function setupEventListeners() {
         selectedNode = null;
         updateGraph();
     });
+
+    const btnCloseStory = document.getElementById('btn-close-story');
+    if (btnCloseStory) {
+        btnCloseStory.addEventListener('click', () => {
+            document.getElementById('story-panel').classList.add('hidden');
+        });
+    }
 
     // Modal event listeners
     document.getElementById('btn-open-advanced-matrix').addEventListener('click', () => {
@@ -994,6 +1032,177 @@ function saveAdvancedMatrixModal(node) {
 
     document.getElementById('advanced-matrix-modal').classList.add('hidden');
 }
+
+// ============================================
+// V5 Features: Save / Load Configuration
+// ============================================
+
+document.getElementById('btn-save').addEventListener('click', () => {
+    // We filter out D3's circular references implicitly by carefully building the payload
+    const payload = {
+        nodes: nodes.map(n => ({
+            id: n.id,
+            label: n.label,
+            x: n.x,
+            y: n.y,
+            type: n.type,
+            states: n.states,
+            edgeCPTs: n.edgeCPTs,
+            fullCustomCPT: n.fullCustomCPT,
+            evidence: n.evidence
+        })),
+        links: links.map(l => ({
+            source: l.source.id || l.source,
+            target: l.target.id || l.target,
+            type: l.type
+        }))
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", "network_config.json");
+    dlAnchorElem.click();
+});
+
+document.getElementById('btn-load').addEventListener('click', () => {
+    document.getElementById('file-load').click(); // trigger hidden input
+});
+
+document.getElementById('file-load').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const config = JSON.parse(e.target.result);
+            loadConfiguration(config);
+        } catch (err) {
+            alert("Error parsing network config file: " + err);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = ""; // reset for subsequent loads
+});
+
+function loadConfiguration(config) {
+    // 1. Teardown
+    clearNetworkApp();
+
+    // Manage Story Panel visibility
+    const storyPanel = document.getElementById('story-panel');
+    if (storyPanel && config.story) {
+        document.getElementById('story-title').innerText = config.story.title;
+        document.getElementById('story-content').innerHTML = config.story.html;
+        storyPanel.classList.remove('hidden');
+    } else if (storyPanel) {
+        storyPanel.classList.add('hidden');
+    }
+
+    // We must manually delete all old WASM nodes if we are brute-forcing the memory
+    // (Ideally there would be a `clear_network` in WASM, but reloading solves it natively)
+
+    // 2. Rebuild Nodes
+    config.nodes.forEach(nData => {
+        // Explicitly preserve the loaded ID string to ensure Edge matching works
+        const newNode = {
+            id: nData.id,
+            label: nData.label,
+            x: nData.x,
+            y: nData.y,
+            type: nData.type || 'basic',
+            states: nData.states,
+            evidence: nData.evidence !== undefined ? nData.evidence : null,
+            edgeCPTs: nData.edgeCPTs || {},
+            fullCustomCPT: nData.fullCustomCPT || null,
+            marginalP: []
+        };
+        nodes.push(newNode);
+        BEngine.ccall('create_node', 'void', ['string', 'number'], [newNode.id, newNode.states.length]);
+
+        // Update the global counter to avoid future collisions by finding the highest 'n' integer appended.
+        const numMatch = nData.id.match(/\d+/);
+        if (numMatch) {
+            let nNum = parseInt(numMatch[0]);
+            if (nNum >= nodeCounter) nodeCounter = nNum + 1;
+        }
+    });
+
+    // 3. Rebuild Edges
+    config.links.forEach(lData => {
+        const srcNode = nodes.find(n => n.id === lData.source);
+        const tgtNode = nodes.find(n => n.id === lData.target);
+        if (srcNode && tgtNode) {
+            links.push({ source: srcNode, target: tgtNode, type: lData.type || 'neutral' });
+            BEngine.ccall('add_edge', 'void', ['string', 'string'], [srcNode.id, tgtNode.id]);
+        }
+    });
+
+    updateGraph();
+
+    // 4. Force CPT Recalculation inside Engine
+    // (Since we only saved the JS data, the WASM memory is blank until we re-trigger autoGenerateJointCPT)
+    nodes.forEach(n => {
+        if (n.fullCustomCPT) {
+            setCptApp(n.id, n.fullCustomCPT);
+        } else {
+            autoGenerateJointCPT(n);
+        }
+    });
+
+    // 5. Restore Evidence
+    nodes.forEach(n => {
+        if (n.evidence !== null) {
+            setEvidenceApp(n.id, n.evidence);
+        }
+    });
+
+    recalculateAll();
+}
+
+// ============================================
+// V5 Features: Export SVG Canvas
+// ============================================
+
+document.getElementById('btn-export-svg').addEventListener('click', () => {
+    const svgEl = document.getElementById('network-canvas');
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(svgEl);
+
+    // Provide a namespace so it renders standalone
+    if (!source.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
+        source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+
+    const dataStr = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", "network_canvas.svg");
+    dlAnchorElem.click();
+});
+
+// ============================================
+// V7 Features: Demo Loaders
+// ============================================
+
+document.getElementById('demo-loader').addEventListener('change', async (event) => {
+    const filename = event.target.value;
+    if (!filename) return;
+
+    try {
+        const response = await fetch(filename);
+        if (!response.ok) throw new Error("Failed to fetch demo file.");
+        const config = await response.json();
+
+        loadConfiguration(config);
+
+        // Reset dropdown so they can pick it again if needed
+        event.target.value = "";
+    } catch (err) {
+        alert("Error loading demo scenario: " + err.message);
+    }
+});
 
 // Start
 window.onload = init;

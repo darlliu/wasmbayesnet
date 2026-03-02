@@ -1,0 +1,1 @@
+call emcc -O3 -std=c++20 src/wrapper.cpp -s WASM=1 -s EXPORTED_FUNCTIONS="['_create_node', '_add_edge', '_set_cpt', '_set_evidence', '_clear_all_evidence', '_clear_network', '_get_marginals', '_malloc', '_free']" -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','getValue','setValue']" -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME="Module" -o frontend/engine.js
