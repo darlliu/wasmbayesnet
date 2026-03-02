@@ -459,128 +459,187 @@ function buildCascadingSliders(targetNode, parentId, parentStateIndex, labelText
     const sliders = [];
     const valDisplays = [];
 
-    // Single slider logic for binary nodes
-    if (targetNode.states.length === 2 && cIdx === 0) {
-        const row = document.createElement('div');
-        row.className = "slider-container";
+    targetNode.states.forEach((childState, cIdx) => {
+        // Single slider logic for binary nodes
+        if (targetNode.states.length === 2 && cIdx === 0) {
+            const row = document.createElement('div');
+            row.className = "slider-container";
 
-        const sLabelLeft = document.createElement('div');
-        sLabelLeft.className = "slider-label";
-        sLabelLeft.textContent = targetNode.states[0];
+            const numInput = document.createElement('input');
+            numInput.type = 'number';
+            numInput.min = '0';
+            numInput.max = '1';
+            numInput.step = '0.01';
+            numInput.value = probs[0].toFixed(2);
+            numInput.style.width = "70px";
+            numInput.style.textAlign = "center";
+            numInput.style.background = "rgba(0,0,0,0.3)";
+            numInput.style.color = "white";
+            numInput.style.border = "1px solid var(--border-color)";
+            numInput.style.borderRadius = "4px";
+            numInput.style.padding = "4px";
+            numInput.style.margin = "0 10px";
 
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.min = '0';
-        slider.max = '1';
-        slider.step = '0.01';
-        slider.value = probs[0]; // Value represents probability of True
-        slider.style.flexGrow = "1";
-        slider.style.cursor = "pointer";
-        slider.style.pointerEvents = "auto";
+            const sLabelRight = document.createElement('div');
+            sLabelRight.className = "slider-label";
+            sLabelRight.textContent = targetNode.states[0]; // T on right
+            sLabelRight.style.transition = "all 0.1s ease";
+            sLabelRight.style.display = "inline-block";
 
-        const sLabelRight = document.createElement('div');
-        sLabelRight.className = "slider-label";
-        sLabelRight.style.textAlign = "right";
-        sLabelRight.textContent = targetNode.states[1];
+            const updateLabelVisual = (val) => {
+                // Dimmer base at 0, bright neon blue/cyan at 1
+                const baseOpacity = 0.3 + (val * 0.7);
+                sLabelRight.style.color = `rgba(0, 180, 255, ${baseOpacity})`;
+                sLabelRight.style.textShadow = `0 0 ${val * 12}px rgba(0, 180, 255, ${val})`;
+                sLabelRight.style.fontWeight = val > 0.5 ? "bold" : "normal";
+                sLabelRight.style.transform = `scale(${1 + val * 0.15})`;
+            };
 
-        const sVal = document.createElement('div');
-        sVal.className = "slider-value";
-        sVal.textContent = probs[0].toFixed(2);
+            // Init visually
+            updateLabelVisual(probs[0]);
 
-        slider.addEventListener('input', (e) => {
-            let val = parseFloat(e.target.value);
-            probs[0] = val;
-            probs[1] = 1.0 - val;
-            sVal.textContent = val.toFixed(2);
+            numInput.addEventListener('input', (e) => {
+                let val = parseFloat(e.target.value);
+                if (isNaN(val)) return;
 
-            targetNode.fullCustomCPT = null;
-            autoGenerateJointCPT(targetNode);
-            recalculateAll();
-            updatePropertiesPanel(targetNode, true);
-        });
+                if (val > 1.0) val = 1.0;
+                if (val < 0.0) val = 0.0;
 
-        row.appendChild(sLabelLeft);
-        row.appendChild(slider);
-        row.appendChild(sLabelRight);
-        row.appendChild(sVal);
-        container.appendChild(row);
-    }
-    else if (targetNode.states.length > 2) {
-        // Complex node cascading logic
-        const row = document.createElement('div');
-        row.className = "slider-container";
+                probs[0] = val;
+                probs[1] = 1.0 - val;
 
-        const sLabel = document.createElement('div');
-        sLabel.className = "slider-label";
-        sLabel.textContent = childState;
+                updateLabelVisual(val);
 
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.min = '0';
-        slider.max = '1';
-        slider.step = '0.01';
-        slider.value = probs[cIdx];
-        slider.style.cursor = "pointer";
-        slider.style.pointerEvents = "auto";
+                targetNode.fullCustomCPT = null;
+                autoGenerateJointCPT(targetNode);
+                recalculateAll();
+                updatePropertiesPanel(targetNode, true);
+            });
 
-        const sVal = document.createElement('div');
-        sVal.className = "slider-value";
-        sVal.textContent = probs[cIdx].toFixed(2);
+            // Prevent DOM destruction specifically here 
+            // since we don't want to lose focus while typing numbers
+            numInput.addEventListener('change', (e) => {
+                let val = parseFloat(e.target.value);
+                if (isNaN(val)) {
+                    val = 0.0;
+                }
+                e.target.value = val.toFixed(2);
+            });
 
-        if (cIdx === targetNode.states.length - 1) {
-            slider.disabled = true;
-            slider.style.opacity = '0.5';
+            // Force alignment row center
+            row.style.justifyContent = "center";
+            row.style.alignItems = "center";
+            row.style.gap = "15px";
+
+            row.appendChild(numInput);
+            row.appendChild(sLabelRight);
+            container.appendChild(row);
         }
+        else if (targetNode.states.length > 2) {
+            // Complex node cascading logic
+            const row = document.createElement('div');
+            row.className = "slider-container";
 
-        slider.addEventListener('input', (e) => {
-            let val = parseFloat(e.target.value);
+            const sLabel = document.createElement('div');
+            sLabel.className = "slider-label";
+            sLabel.textContent = childState;
 
-            // If we increase this slider, we must strictly steal from the sliders *after* it
-            // If those don't have enough, we steal from the ones *before* it. 
-            // A simpler, more robust approach: 
-            let diff = val - probs[cIdx];
-            probs[cIdx] = val;
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = '0';
+            slider.max = '1';
+            slider.step = '0.005';
+            let initialVal = Math.max(0.005, Math.min(0.995, probs[cIdx]));
+            slider.value = initialVal;
+            slider.style.cursor = "pointer";
+            slider.style.pointerEvents = "auto";
+            slider.style.setProperty('--val', `${initialVal * 100}%`);
 
-            if (diff > 0) {
-                // We need to steal `diff` from other states to keep sum exactly 1.0
-                // Steal from right-to-left, skipping ourselves
-                for (let i = targetNode.states.length - 1; i >= 0 && diff > 0.0001; i--) {
-                    if (i === cIdx) continue;
-                    let available = probs[i];
-                    let steal = Math.min(available, diff);
-                    probs[i] -= steal;
-                    diff -= steal;
+            const sVal = document.createElement('div');
+            sVal.className = "slider-value";
+            sVal.textContent = probs[cIdx].toFixed(2);
 
-                    // Update DOM for victims
+            if (cIdx === targetNode.states.length - 1) {
+                slider.disabled = true;
+                slider.style.opacity = '0.5';
+            }
+
+            slider.addEventListener('input', (e) => {
+                let val = parseFloat(e.target.value);
+
+                // Prevent locking the slider down by leaving a tiny epsilon if it hits 1.0 
+                // but other sliders exist (to allow dragging them back up)
+                if (val > 0.999) val = 0.999;
+                if (val < 0.001) val = 0.001;
+
+                let oldVal = probs[cIdx];
+                probs[cIdx] = val;
+
+                // We need to distribute the remaining probability (1.0 - val) 
+                // proportionately among all OTHER states based on their current relative weights.
+                let remainderToDistribute = 1.0 - val;
+
+                // Calculate the total probability currently held by the *other* states
+                let sumOther = 0;
+                for (let i = 0; i < targetNode.states.length; i++) {
+                    if (i !== cIdx) sumOther += probs[i];
+                }
+
+                if (sumOther <= 0.0001) {
+                    // Edge case: all other sliders had 0 probability. Distribute evenly.
+                    let evenSplit = remainderToDistribute / (targetNode.states.length - 1);
+                    for (let i = 0; i < targetNode.states.length; i++) {
+                        if (i !== cIdx) probs[i] = evenSplit;
+                    }
+                } else {
+                    // Normal case: scale existing probabilities proportionately
+                    let scaleFactor = remainderToDistribute / sumOther;
+                    for (let i = 0; i < targetNode.states.length; i++) {
+                        if (i !== cIdx) {
+                            probs[i] = probs[i] * scaleFactor;
+                        }
+                    }
+                }
+
+                // Force exact sum to 1.0 by dumping any floating point remainder into the last available slider
+                let finalSum = 0;
+                let lastValidIdx = targetNode.states.length - 1;
+                if (cIdx === lastValidIdx) lastValidIdx = targetNode.states.length - 2;
+
+                for (let i = 0; i < targetNode.states.length; i++) {
+                    if (i !== lastValidIdx) finalSum += probs[i];
+                }
+                probs[lastValidIdx] = 1.0 - finalSum;
+
+                // Sync OTHER sliders with fresh visual updates
+                for (let i = 0; i < targetNode.states.length; i++) {
                     if (sliders[i]) {
-                        sliders[i].value = probs[i];
+                        let clampV = Math.max(0.005, Math.min(0.995, probs[i]));
+
+                        // Extremely important: Do NOT overwrite the value of the active slider!
+                        if (i !== cIdx) {
+                            sliders[i].value = clampV;
+                        }
+
+                        sliders[i].style.setProperty('--val', `${clampV * 100}%`);
                         valDisplays[i].textContent = probs[i].toFixed(2);
                     }
                 }
-            } else if (diff < 0) {
-                // We are giving back `-diff` to the very last slider (the pool)
-                probs[targetNode.states.length - 1] += (-diff);
-                if (sliders[targetNode.states.length - 1]) {
-                    sliders[targetNode.states.length - 1].value = probs[targetNode.states.length - 1];
-                    valDisplays[targetNode.states.length - 1].textContent = probs[targetNode.states.length - 1].toFixed(2);
-                }
-            }
 
-            sVal.textContent = val.toFixed(2);
+                targetNode.fullCustomCPT = null;
+                autoGenerateJointCPT(targetNode);
+                recalculateAll();
+                updatePropertiesPanel(targetNode, true);
+            });
 
-            targetNode.fullCustomCPT = null;
-            autoGenerateJointCPT(targetNode);
-            recalculateAll();
-            updatePropertiesPanel(targetNode, true);
-        });
+            sliders.push(slider);
+            valDisplays.push(sVal);
 
-        sliders.push(slider);
-        valDisplays.push(sVal);
-
-        row.appendChild(sLabel);
-        row.appendChild(slider);
-        row.appendChild(sVal);
-        container.appendChild(row);
+            row.appendChild(sLabel);
+            row.appendChild(slider);
+            row.appendChild(sVal);
+            container.appendChild(row);
+        }
     });
 
     return container;
@@ -594,87 +653,88 @@ function updatePropertiesPanel(d, skipCptRender = false) {
     const parentsCol = document.getElementById('parents-section');
     const parentsList = document.getElementById('parents-list');
 
-    if (parentLinks.length > 0) {
-        parentsCol.style.display = 'block';
-        parentsList.innerHTML = '';
-        parentLinks.forEach(l => {
-            const row = document.createElement('div');
-            row.className = 'parent-row';
-            row.id = `parent-row-${l.source.id}`;
-            row.style.transition = 'background-color 0.5s';
-            row.style.padding = '10px 0';
-            row.style.borderBottom = '1px solid var(--border-color)';
+    if (!skipCptRender) {
+        if (parentLinks.length > 0) {
+            parentsCol.style.display = 'block';
+            parentsList.innerHTML = '';
+            parentLinks.forEach(l => {
+                const row = document.createElement('div');
+                row.className = 'parent-row';
+                row.id = `parent-row-${l.source.id}`;
+                row.style.transition = 'background-color 0.5s';
+                row.style.padding = '10px 0';
+                row.style.borderBottom = '1px solid var(--border-color)';
 
-            const headerWrapper = document.createElement('div');
-            headerWrapper.style.display = 'flex';
-            headerWrapper.style.justifyContent = 'space-between';
-            headerWrapper.style.alignItems = 'center';
+                const headerWrapper = document.createElement('div');
+                headerWrapper.style.display = 'flex';
+                headerWrapper.style.justifyContent = 'space-between';
+                headerWrapper.style.alignItems = 'center';
 
-            headerWrapper.innerHTML = `<span style="font-weight: bold; color: var(--accent);">${l.source.label}</span>`;
+                headerWrapper.innerHTML = `<span style="font-weight: bold; color: var(--accent);">${l.source.label}</span>`;
 
-            // Simple Logic applicable?
-            let isSimpleLogic = d.type === 'basic' && l.source.type === 'basic';
+                // Simple Logic applicable?
+                let isSimpleLogic = d.type === 'basic' && l.source.type === 'basic';
 
-            if (isSimpleLogic) {
-                const selectHtml = document.createElement('select');
-                selectHtml.innerHTML = `
-                    <option value="infers" ${l.type === 'infers' ? 'selected' : ''}>Infers</option>
-                    <option value="negates" ${l.type === 'negates' ? 'selected' : ''}>Negates</option>
-                    <option value="neutral" ${l.type === 'neutral' ? 'selected' : ''}>Neutral</option>
-                `;
-                selectHtml.addEventListener('change', (e) => {
-                    l.type = e.target.value;
+                if (isSimpleLogic) {
+                    const selectHtml = document.createElement('select');
+                    selectHtml.innerHTML = `
+                        <option value="infers" ${l.type === 'infers' ? 'selected' : ''}>Infers</option>
+                        <option value="negates" ${l.type === 'negates' ? 'selected' : ''}>Negates</option>
+                        <option value="neutral" ${l.type === 'neutral' ? 'selected' : ''}>Neutral</option>
+                    `;
+                    selectHtml.addEventListener('change', (e) => {
+                        l.type = e.target.value;
 
-                    // Automatically update edgeCPT thresholds based on Logic type
-                    if (!d.edgeCPTs[l.source.id]) d.edgeCPTs[l.source.id] = [[], []];
-                    if (l.type === 'infers') {
-                        d.edgeCPTs[l.source.id][0] = [0.9, 0.1]; // P(C|P=T)
-                        d.edgeCPTs[l.source.id][1] = [0.1, 0.9]; // P(C|P=F)
-                    } else if (l.type === 'negates') {
-                        d.edgeCPTs[l.source.id][0] = [0.1, 0.9];
-                        d.edgeCPTs[l.source.id][1] = [0.9, 0.1];
-                    } else {
-                        d.edgeCPTs[l.source.id][0] = [0.5, 0.5];
-                        d.edgeCPTs[l.source.id][1] = [0.5, 0.5];
-                    }
-                    d.fullCustomCPT = null;
-                    autoGenerateJointCPT(d);
-                    recalculateAll();
-                    updateGraph();
-                    updatePropertiesPanel(d); // full re-render
+                        // Automatically update edgeCPT thresholds based on Logic type
+                        if (!d.edgeCPTs[l.source.id]) d.edgeCPTs[l.source.id] = [[], []];
+                        if (l.type === 'infers') {
+                            d.edgeCPTs[l.source.id][0] = [0.9, 0.1]; // P(C|P=T)
+                            d.edgeCPTs[l.source.id][1] = [0.1, 0.9]; // P(C|P=F)
+                        } else if (l.type === 'negates') {
+                            d.edgeCPTs[l.source.id][0] = [0.1, 0.9];
+                            d.edgeCPTs[l.source.id][1] = [0.9, 0.1];
+                        } else {
+                            d.edgeCPTs[l.source.id][0] = [0.5, 0.5];
+                            d.edgeCPTs[l.source.id][1] = [0.5, 0.5];
+                        }
+                        d.fullCustomCPT = null;
+                        autoGenerateJointCPT(d);
+                        recalculateAll();
+                        updateGraph();
+                        updatePropertiesPanel(d); // full re-render
+                    });
+                    headerWrapper.appendChild(selectHtml);
+                } else {
+                    l.type = 'neutral';
+                    // Don't override complex properties explicitly here, just let sliders handle it
+                }
+                row.appendChild(headerWrapper);
+
+                // Sliders for P(Child | Parent=State)
+                const sliderWrapper = document.createElement('div');
+                sliderWrapper.style.display = 'flex';
+                sliderWrapper.style.flexDirection = 'column'; // Stack sliders vertically to ensure full width
+                sliderWrapper.style.gap = '10px';
+
+                l.source.states.forEach((pState, sIdx) => {
+                    const sContainer = buildCascadingSliders(d, l.source.id, sIdx, `When ${l.source.label} is ${pState}:`);
+                    sContainer.style.flex = "1 1 auto"; // Allow them to grow and wrap 
+                    sliderWrapper.appendChild(sContainer);
                 });
-                headerWrapper.appendChild(selectHtml);
-            } else {
-                l.type = 'neutral';
-                // Don't override complex properties explicitly here, just let sliders handle it
-            }
-            row.appendChild(headerWrapper);
 
-            // Sliders for P(Child | Parent=State)
-            const sliderWrapper = document.createElement('div');
-            sliderWrapper.style.display = 'flex';
-            sliderWrapper.style.flexDirection = 'row'; // Stack sliders horizontally to prevent clipping
-            sliderWrapper.style.flexWrap = 'wrap'; // Break vertically if no space
-            sliderWrapper.style.gap = '10px';
+                row.appendChild(sliderWrapper);
 
-            l.source.states.forEach((pState, sIdx) => {
-                const sContainer = buildCascadingSliders(d, l.source.id, sIdx, `When ${l.source.label} is ${pState}:`);
-                sContainer.style.flex = "1 1 auto"; // Allow them to grow and wrap 
-                sliderWrapper.appendChild(sContainer);
+                parentsList.appendChild(row);
             });
+        } else {
+            parentsCol.style.display = 'none';
+            parentsList.innerHTML = '';
 
-            row.appendChild(sliderWrapper);
-
-            parentsList.appendChild(row);
-        });
-    } else {
-        parentsCol.style.display = 'none';
-        parentsList.innerHTML = '';
-
-        // Root node needs prior sliders!
-        const priorContainer = buildCascadingSliders(d, 'prior', 0, `Base Prior Probability (No Parents):`);
-        parentsCol.style.display = 'block';
-        parentsList.appendChild(priorContainer);
+            // Root node needs prior sliders!
+            const priorContainer = buildCascadingSliders(d, 'prior', 0, `Base Prior Probability (No Parents):`);
+            parentsCol.style.display = 'block';
+            parentsList.appendChild(priorContainer);
+        }
     }
 
     // Auto Gen init if missing
@@ -749,17 +809,28 @@ function setupEventListeners() {
     });
 
     document.getElementById('btn-add-complex-node').addEventListener('click', () => {
+        document.getElementById('complex-states-input').value = "Sunny, Rainy, Foggy";
+        document.getElementById('add-complex-modal').classList.remove('hidden');
+        document.getElementById('complex-states-input').focus();
+    });
 
-        // Standard window.prompt is used here, ensure focus is handled
-        setTimeout(() => {
-            const stateStr = prompt("Enter states, comma separated:", "Sunny, Rainy, Foggy");
-            if (stateStr) {
-                const states = stateStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
-                if (states.length > 0) {
-                    addNodeToApp("New Complex", width / 2, height / 2, 'complex', states);
-                }
+    document.getElementById('btn-close-complex-modal').addEventListener('click', () => {
+        document.getElementById('add-complex-modal').classList.add('hidden');
+    });
+
+    document.getElementById('btn-cancel-complex-modal').addEventListener('click', () => {
+        document.getElementById('add-complex-modal').classList.add('hidden');
+    });
+
+    document.getElementById('btn-confirm-complex-modal').addEventListener('click', () => {
+        const stateStr = document.getElementById('complex-states-input').value;
+        if (stateStr) {
+            const states = stateStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            if (states.length > 0) {
+                addNodeToApp("New Complex", width / 2, height / 2, 'complex', states);
             }
-        }, 10);
+        }
+        document.getElementById('add-complex-modal').classList.add('hidden');
     });
 
     document.getElementById('edit-node-name').addEventListener('input', (e) => {

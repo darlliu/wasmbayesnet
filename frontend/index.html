@@ -90,6 +90,28 @@
             </div>
         </aside>
     </main>
+    <!-- Add Complex Node Modal -->
+    <div id="add-complex-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Add Complex Node</h3>
+                <button class="btn-icon" id="btn-close-complex-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Enter states for the new complex node, separated by commas (e.g., Sunny,
+                    Rainy, Foggy).</p>
+                <div class="input-group" style="margin-top: 15px;">
+                    <input type="text" id="complex-states-input" placeholder="Sunny, Rainy, Foggy"
+                        style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-panel); color: var(--text-color);">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-complex-modal" class="btn secondary">Cancel</button>
+                <button id="btn-confirm-complex-modal" class="btn primary">Add Node</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Advanced Matrix Modal -->
     <div id="advanced-matrix-modal" class="modal hidden">
         <div class="modal-content">
