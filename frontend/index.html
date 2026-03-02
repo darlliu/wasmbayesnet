@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WasmBayesNet - Interactive Bayesian Network Builder</title>
-    
+
     <!-- Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
-    
+
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <!-- Top Navigation Bar -->
     <header class="navbar">
@@ -20,7 +22,10 @@
             <h1>WasmBayesNet</h1>
         </div>
         <div class="controls">
-            <button id="btn-add-node" class="btn primary">Add Node</button>
+            <button id="btn-add-basic-node" class="btn primary">Add Basic Node</button>
+            <button id="btn-add-complex-node" class="btn primary" style="background-color: #8b5cf6;">Add Complex
+                Node</button>
+            <button id="btn-add-edge" class="btn secondary">Add Edge</button>
             <button id="btn-clear" class="btn secondary">Clear Canvas</button>
             <div class="engine-status">
                 <div id="wasm-indicator" class="indicator checking"></div>
@@ -46,40 +51,73 @@
                 <div class="empty-state" id="panel-empty">
                     Select a node to edit its probabilities or set evidence.
                 </div>
-                
+
                 <div id="panel-editor" class="hidden">
-                    <h3 id="edit-node-name">Variable name</h3>
-                    
+                    <div class="panel-header">
+                        <input type="text" id="edit-node-name" value="Node Name" class="editable-header">
+                        <button class="btn-icon" id="btn-close-panel">&times;</button>
+                    </div>
+
                     <div class="section">
                         <h4>Evidence (Observation)</h4>
                         <div class="toggle-group" id="evidence-controls">
-                            <button class="toggle-btn" data-state="none">Unknown</button>
-                            <button class="toggle-btn" data-state="0">True</button>
-                            <button class="toggle-btn" data-state="1">False</button>
+                            <!-- Dynamic buttons go here -->
                         </div>
+                    </div>
+
+                    <div class="section" id="parents-section" style="display: none;">
+                        <h4>Parent Influences</h4>
+                        <div id="parents-list">
+                            <!-- Parent dropdowns will go here -->
+                        </div>
+                    </div>
+
+                    <div class="section" id="cpt-section">
+                        <div class="flex-between">
+                            <h4>Conditional Probabilities</h4>
+                        </div>
+                        <button id="btn-open-advanced-matrix" class="btn secondary"
+                            style="width: 100%; margin-top: 10px;">Open Advanced Matrix</button>
                     </div>
 
                     <div class="section">
                         <h4>Marginal Probabilities</h4>
-                        <div class="progress-bar-container">
-                            <div class="progress-label"><span>True</span> <span id="prob-true-pct">--%</span></div>
-                            <div class="progress-track"><div id="prob-true-bar" class="progress-fill true-color" style="width: 0%"></div></div>
-                        </div>
-                        <div class="progress-bar-container">
-                            <div class="progress-label"><span>False</span> <span id="prob-false-pct">--%</span></div>
-                            <div class="progress-track"><div id="prob-false-bar" class="progress-fill false-color" style="width: 0%"></div></div>
+                        <div id="marginals-container">
+                            <!-- Progress bars generated here -->
                         </div>
                     </div>
                 </div>
             </div>
         </aside>
     </main>
+    <!-- Advanced Matrix Modal -->
+    <div id="advanced-matrix-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-node-name">Node Name - Advanced Matrix</h3>
+                <button class="btn-icon" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Enter exact probabilities. Each row must sum to precisely 1.0.</p>
+                <div id="modal-cpt-grid" class="cpt-grid">
+                    <!-- Populated dynamically -->
+                </div>
+                <div id="modal-error-msg" class="error-msg hidden">Some rows do not sum to 1.0! Correct highlighted
+                    rows.</div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-modal" class="btn secondary">Cancel</button>
+                <button id="btn-save-modal" class="btn primary">Save & Apply</button>
+            </div>
+        </div>
+    </div>
 
     <!-- D3.js from CDN (Zero local dependencies!) -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    
+
     <!-- WASM Module loading and App Logic -->
     <script src="engine.js"></script> <!-- Will be generated by Emscripten -->
     <script type="module" src="app.js"></script>
 </body>
+
 </html>

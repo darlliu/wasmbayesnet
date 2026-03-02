@@ -7,14 +7,18 @@ let links = [];
 let selectedNode = null;
 let nodeCounter = 0;
 
+// Edge Linking State
+let isLinkingMode = false;
+let linkingSourceNode = null;
+
 // --- D3 Canvas Setup ---
 const svg = d3.select("#network-canvas");
 const width = svg.node().clientWidth;
 const height = svg.node().clientHeight;
 
 const simulation = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(links).id(d => d.id).distance(150))
-    .force("charge", d3.forceManyBody().strength(-400))
+    .force("link", d3.forceLink(links).id(d => d.id).distance(200))
+    .force("charge", d3.forceManyBody().strength(-150))
     .force("center", d3.forceCenter(width / 2, height / 2))
     .force("collide", d3.forceCollide().radius(50));
 
@@ -62,29 +66,43 @@ async function init() {
 // --- Demo Builder ---
 function createDemoNetwork() {
     // 1. Create nodes in UI and WASM
-    const idA = addNodeToApp("Weather", width / 2, height / 2 - 100);
-    const idB = addNodeToApp("Murder", width / 2, height / 2 + 100);
+    const idA = addNodeToApp("Weather", width / 2, height / 2 - 100, 'complex', ["Sunny", "Rainy", "Foggy"]);
+    const idB = addNodeToApp("Murder", width / 2, height / 2 + 100, 'basic', ["True", "False"]);
 
     // 2. Link them
     addLink(idA, idB);
 
-    // 3. Set CPTs in WASM 
-    // Weather (True=Bad, False=Good) -> 20% Bad
-    setCptWasm(idA, [0.2, 0.8]);
+    // 3. Set CPTs in WASM and UI App State
+    // Weather (Prior): 60% Sunny, 30% Rainy, 10% Foggy
+    setCptApp(idA, [0.6, 0.3, 0.1]);
 
-    // Murder | Weather. Order: [M=T | W=T], [M=F | W=T], [M=T | W=F], [M=F | W=F]
-    // If Weather is Bad (True), Murder=True is 50%. If Good (False), Murder=True is 5%
-    setCptWasm(idB, [0.5, 0.5, 0.05, 0.95]);
+    // Murder | Weather. Order matches C++ traversal: [M_S0|W_S0], [M_S1|W_S0], [M_S0|W_S1], [M_S1|W_S1], [M_S0|W_S2], [M_S1|W_S2]
+    // Sunny -> Murder true is 5%. Rainy -> Murder true is 30%. Foggy -> Murder true is 80%.
+    // State 0 = True, State 1 = False.
+    setCptApp(idB, [
+        0.05, 0.95, // W = Sunny
+        0.30, 0.70, // W = Rainy
+        0.80, 0.20  // W = Foggy
+    ]);
+
+    // Explicitly set the link type for the demo
+    const demoLink = links.find(l => l.source.id === idA && l.target.id === idB);
+    if (demoLink) demoLink.type = 'neutral';
 
     recalculateAll();
 }
 
+function setCptApp(nodeId, probArray) {
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) node.customCPT = probArray;
+    setCptWasm(nodeId, probArray);
+}
+
 // --- WASM Interface Wrappers ---
 
-function addNodeToWasm(id) {
+function addNodeToWasm(id, numStates) {
     if (!BEngine) return;
-    // We assume all variables are binary (True/False) for this UI
-    BEngine.ccall('create_node', 'void', ['string', 'number'], [id, 2]);
+    BEngine.ccall('create_node', 'void', ['string', 'number'], [id, numStates]);
 }
 
 function addEdgeToWasm(parentId, childId) {
@@ -116,17 +134,23 @@ function setEvidenceWasm(nodeId, stateIndex) {
 }
 
 function getMarginalsWasm(nodeId) {
-    if (!BEngine) return [0, 0];
+    if (!BEngine) return [];
+
+    // Need to know how many states to fetch
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return [];
+    const numStates = node.states.length;
+
     const _malloc = BEngine._malloc || BEngine.malloc || (size => BEngine.ccall('malloc', 'number', ['number'], [size]));
     const _free = BEngine._free || BEngine.free || (ptr => BEngine.ccall('free', 'void', ['number'], [ptr]));
 
-    const ptr = _malloc(2 * 4); // 2 floats
-    BEngine.ccall('get_marginals', 'void', ['string', 'number', 'number'], [nodeId, ptr, 2]);
+    const ptr = _malloc(numStates * 4); // float32 size
+    BEngine.ccall('get_marginals', 'void', ['string', 'number', 'number'], [nodeId, ptr, numStates]);
 
     const memory = BEngine.wasmMemory || BEngine.memory;
     const buffer = memory ? memory.buffer : BEngine.HEAP8.buffer;
-    const view = new Float32Array(buffer, ptr, 2);
-    const output = [view[0], view[1]];
+    const view = new Float32Array(buffer, ptr, numStates);
+    const output = Array.from(view);
 
     _free(ptr);
     return output;
@@ -134,17 +158,98 @@ function getMarginalsWasm(nodeId) {
 
 // --- Core App Logic ---
 
-function addNodeToApp(name, x, y) {
+function addNodeToApp(name, x, y, type = 'basic', states = ["True", "False"]) {
     const id = "N" + (++nodeCounter);
     const label = name || id;
 
-    const newNode = { id, label, x, y, evidence: -1 };
+    // edgeCPTs maps parentId -> array of conditional probabilities given that parent's states.
+    // fullCustomCPT is for the advanced matrix if they override independence.
+    const newNode = { id, label, x, y, evidence: -1, type, states, edgeCPTs: {}, fullCustomCPT: null };
     nodes.push(newNode);
 
-    addNodeToWasm(id);
+    addNodeToWasm(id, states.length);
 
     updateGraph();
     return id;
+}
+
+// Helper to get all parent state combinations
+function getParentStateCombinations(parentLinks) {
+    if (parentLinks.length === 0) {
+        return [[]]; // No parents, one combination (empty)
+    }
+
+    const parentStates = parentLinks.map(l => l.source.states);
+    const combinations = [];
+
+    function generateCombinations(index, currentCombination) {
+        if (index === parentStates.length) {
+            combinations.push(currentCombination);
+            return;
+        }
+
+        for (let i = 0; i < parentStates[index].length; i++) {
+            generateCombinations(index + 1, currentCombination.concat({
+                parent: parentLinks[index].source,
+                stateIndex: i,
+                stateName: parentStates[index][i]
+            }));
+        }
+    }
+
+    generateCombinations(0, []);
+    return combinations;
+}
+
+// Builds the full joint matrix from independent edge CPTs (ICI model)
+function autoGenerateJointCPT(node) {
+    if (node.fullCustomCPT) {
+        // If they saved an advanced matrix, override ICI
+        setCptApp(node.id, node.fullCustomCPT);
+        return;
+    }
+
+    const parentLinks = links.filter(l => l.target.id === node.id);
+    const childNumStates = node.states.length;
+    const jointCpt = [];
+
+    const parentCombinations = getParentStateCombinations(parentLinks);
+
+    parentCombinations.forEach(combo => {
+        // Initialize with default uniform probabilities
+        let rowProbs = Array(childNumStates).fill(1.0);
+        let validParents = 0;
+
+        combo.forEach(parentState => {
+            const pid = parentState.parent.id;
+            const sIdx = parentState.stateIndex;
+
+            // Look up independent edge math for this parent
+            if (node.edgeCPTs && node.edgeCPTs[pid]) {
+                const independentProbs = node.edgeCPTs[pid][sIdx];
+                if (independentProbs) {
+                    for (let i = 0; i < childNumStates; i++) {
+                        rowProbs[i] *= independentProbs[i];
+                    }
+                    validParents++;
+                }
+            }
+        });
+
+        // Normalize the combined row
+        let sum = rowProbs.reduce((a, b) => a + b, 0);
+        if (sum === 0 || validParents === 0) {
+            // Fallback uniform if zero or no rules defined
+            rowProbs = Array(childNumStates).fill(1.0 / childNumStates);
+        } else {
+            rowProbs = rowProbs.map(p => p / sum);
+        }
+
+        rowProbs.forEach(p => jointCpt.push(p));
+    });
+
+    node.customCPT = jointCpt;
+    setCptApp(node.id, jointCpt);
 }
 
 function addLink(sourceId, targetId) {
@@ -154,8 +259,10 @@ function addLink(sourceId, targetId) {
     if (sourceNode && targetNode && sourceId !== targetId) {
         // Prevent dupes
         if (!links.some(l => l.source.id === sourceId && l.target.id === targetId)) {
-            links.push({ source: sourceNode, target: targetNode });
+            links.push({ source: sourceNode, target: targetNode, type: 'infers' });
             addEdgeToWasm(sourceId, targetId);
+            autoGenerateJointCPT(targetNode);
+            recalculateAll();
             updateGraph();
         }
     }
@@ -179,10 +286,26 @@ function updateGraph() {
     // Links
     linkElements = linkElements.data(links, d => d.source.id + "-" + d.target.id);
     linkElements.exit().remove();
+
     const linkEnter = linkElements.enter().append("path")
-        .attr("class", "link")
-        .attr("marker-end", "url(#arrow)");
+        .attr("class", d => `link edge-${d.type}`)
+        .attr("marker-end", "url(#arrowhead)")
+        .style("cursor", "pointer")
+        .on("click", (event, d) => {
+            // When clicking an edge, select the child node
+            selectNode(d.target);
+            // Highlight the specific parent row in the properties panel
+            setTimeout(() => {
+                const row = document.getElementById(`parent-row-${d.source.id}`);
+                if (row) {
+                    row.style.backgroundColor = "rgba(59, 130, 246, 0.2)";
+                    setTimeout(() => row.style.backgroundColor = "transparent", 1000);
+                }
+            }, 50);
+        });
+
     linkElements = linkEnter.merge(linkElements);
+    linkElements.attr("class", d => `link edge-${d.type}`);
 
     // Nodes
     nodeElements = nodeElements.data(nodes, d => d.id);
@@ -194,22 +317,54 @@ function updateGraph() {
             .on("start", dragstarted)
             .on("drag", dragged)
             .on("end", dragended))
-        .on("click", (event, d) => selectNode(d));
+        .on("click", (event, d) => selectNode(d))
+        .on("dblclick", (event, d) => {
+            const newName = prompt("Enter new name for node:", d.label);
+            if (newName && newName.trim() !== "") {
+                d.label = newName.trim();
+                updateGraph();
+                if (selectedNode && selectedNode.id === d.id) {
+                    document.getElementById('edit-node-name').value = d.label;
+                }
+            }
+        });
 
-    nodeEnter.append("circle").attr("r", 30);
+    nodeEnter.append("circle")
+        .attr("r", 30)
+        .attr("display", d => d.type === 'basic' ? null : "none");
+
+    nodeEnter.append("rect")
+        .attr("width", 80)
+        .attr("height", 40)
+        .attr("x", -40)
+        .attr("y", -20)
+        .attr("display", d => d.type === 'complex' ? null : "none");
+
     nodeEnter.append("text")
-        .attr("dy", ".35em")
+        .attr("dy", d => d.type === 'basic' ? ".35em" : "-5px")
         .attr("text-anchor", "middle")
         .text(d => d.label);
 
+    nodeEnter.append("text")
+        .attr("class", "subtext")
+        .attr("dy", "15px")
+        .attr("text-anchor", "middle")
+        .attr("font-size", "10px")
+        .attr("fill", "var(--text-muted)")
+        .attr("display", d => d.type === 'complex' ? null : "none")
+        .text(d => d.states.length + " states");
+
     nodeElements = nodeEnter.merge(nodeElements);
+
+    // Update texts dynamically on rename
+    nodeElements.select("text").text(d => d.label);
 
     // Rebind CSS classes based on state
     nodeElements.attr("class", d => {
-        let cls = "node";
+        let cls = "node " + d.type;
         if (selectedNode && d.id === selectedNode.id) cls += " selected";
-        if (d.evidence === 0) cls += " evidence-true";
-        if (d.evidence === 1) cls += " evidence-false";
+        if (linkingSourceNode && d.id === linkingSourceNode.id) cls += " linking-source";
+        if (d.evidence !== -1) cls += " evidence-set";
         return cls;
     });
 
@@ -233,6 +388,13 @@ function dragended(event, d) {
 }
 
 simulation.on("tick", () => {
+    // Constrain nodes within bounds
+    const radius = 30;
+    nodes.forEach(d => {
+        d.x = Math.max(radius, Math.min(width - radius, d.x));
+        d.y = Math.max(radius, Math.min(height - radius, d.y));
+    });
+
     linkElements.attr("d", d => {
         const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
         const dr = Math.sqrt(dx * dx + dy * dy) * 1.5; // Curved edges
@@ -244,6 +406,26 @@ simulation.on("tick", () => {
 // --- UI Interactions ---
 
 function selectNode(d) {
+    if (isLinkingMode) {
+        if (!linkingSourceNode) {
+            linkingSourceNode = d;
+            updateGraph(); // Highlight source
+        } else if (linkingSourceNode.id !== d.id) {
+            addLink(linkingSourceNode.id, d.id);
+            // Reset linking mode
+            isLinkingMode = false;
+            linkingSourceNode = null;
+            const btnAddEdge = document.getElementById('btn-add-edge');
+            if (btnAddEdge) {
+                btnAddEdge.classList.remove('active');
+                btnAddEdge.textContent = 'Add Edge';
+            }
+            svg.classed('linking-mode', false);
+            updateGraph();
+        }
+        return; // Don't open properties panel in linking mode
+    }
+
     selectedNode = d;
     updateGraph(); // trigger highlighting
 
@@ -254,33 +436,350 @@ function selectNode(d) {
     updatePropertiesPanel(d);
 }
 
-function updatePropertiesPanel(d) {
-    document.getElementById('edit-node-name').textContent = d.label;
+// Helper to build a cascading slider group for a target node and a specific parent state
+function buildCascadingSliders(targetNode, parentId, parentStateIndex, labelText) {
+    const container = document.createElement('div');
+    container.style.marginTop = "10px";
+    container.style.paddingLeft = "10px";
+    container.style.borderLeft = "2px solid rgba(255,255,255,0.1)";
 
-    // Evidence buttons
-    document.querySelectorAll('.toggle-btn').forEach(btn => btn.classList.remove('active'));
-    let stateStr = "none";
-    if (d.evidence === 0) stateStr = "0";
-    if (d.evidence === 1) stateStr = "1";
-    document.querySelector(`.toggle-btn[data-state="${stateStr}"]`).classList.add('active');
+    const label = document.createElement('div');
+    label.style.fontSize = "0.85rem";
+    label.style.color = "var(--text-muted)";
+    label.textContent = labelText;
+    container.appendChild(label);
 
-    // Probabilities
-    if (d.marginals) {
-        const pTrue = (d.marginals[0] * 100).toFixed(1);
-        const pFalse = (d.marginals[1] * 100).toFixed(1);
+    // Initialize edgeCPT array if undefined
+    if (!targetNode.edgeCPTs[parentId]) targetNode.edgeCPTs[parentId] = [];
+    if (!targetNode.edgeCPTs[parentId][parentStateIndex]) {
+        targetNode.edgeCPTs[parentId][parentStateIndex] = Array(targetNode.states.length).fill(1.0 / targetNode.states.length);
+    }
+    const probs = targetNode.edgeCPTs[parentId][parentStateIndex];
 
-        document.getElementById('prob-true-pct').textContent = pTrue + '%';
-        document.getElementById('prob-false-pct').textContent = pFalse + '%';
+    const sliders = [];
+    const valDisplays = [];
 
-        document.getElementById('prob-true-bar').style.width = pTrue + '%';
-        document.getElementById('prob-false-bar').style.width = pFalse + '%';
+    // Single slider logic for binary nodes
+    if (targetNode.states.length === 2 && cIdx === 0) {
+        const row = document.createElement('div');
+        row.className = "slider-container";
+
+        const sLabelLeft = document.createElement('div');
+        sLabelLeft.className = "slider-label";
+        sLabelLeft.textContent = targetNode.states[0];
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = '0.01';
+        slider.value = probs[0]; // Value represents probability of True
+        slider.style.flexGrow = "1";
+        slider.style.cursor = "pointer";
+        slider.style.pointerEvents = "auto";
+
+        const sLabelRight = document.createElement('div');
+        sLabelRight.className = "slider-label";
+        sLabelRight.style.textAlign = "right";
+        sLabelRight.textContent = targetNode.states[1];
+
+        const sVal = document.createElement('div');
+        sVal.className = "slider-value";
+        sVal.textContent = probs[0].toFixed(2);
+
+        slider.addEventListener('input', (e) => {
+            let val = parseFloat(e.target.value);
+            probs[0] = val;
+            probs[1] = 1.0 - val;
+            sVal.textContent = val.toFixed(2);
+
+            targetNode.fullCustomCPT = null;
+            autoGenerateJointCPT(targetNode);
+            recalculateAll();
+            updatePropertiesPanel(targetNode, true);
+        });
+
+        row.appendChild(sLabelLeft);
+        row.appendChild(slider);
+        row.appendChild(sLabelRight);
+        row.appendChild(sVal);
+        container.appendChild(row);
+    }
+    else if (targetNode.states.length > 2) {
+        // Complex node cascading logic
+        const row = document.createElement('div');
+        row.className = "slider-container";
+
+        const sLabel = document.createElement('div');
+        sLabel.className = "slider-label";
+        sLabel.textContent = childState;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = '0.01';
+        slider.value = probs[cIdx];
+        slider.style.cursor = "pointer";
+        slider.style.pointerEvents = "auto";
+
+        const sVal = document.createElement('div');
+        sVal.className = "slider-value";
+        sVal.textContent = probs[cIdx].toFixed(2);
+
+        if (cIdx === targetNode.states.length - 1) {
+            slider.disabled = true;
+            slider.style.opacity = '0.5';
+        }
+
+        slider.addEventListener('input', (e) => {
+            let val = parseFloat(e.target.value);
+
+            // If we increase this slider, we must strictly steal from the sliders *after* it
+            // If those don't have enough, we steal from the ones *before* it. 
+            // A simpler, more robust approach: 
+            let diff = val - probs[cIdx];
+            probs[cIdx] = val;
+
+            if (diff > 0) {
+                // We need to steal `diff` from other states to keep sum exactly 1.0
+                // Steal from right-to-left, skipping ourselves
+                for (let i = targetNode.states.length - 1; i >= 0 && diff > 0.0001; i--) {
+                    if (i === cIdx) continue;
+                    let available = probs[i];
+                    let steal = Math.min(available, diff);
+                    probs[i] -= steal;
+                    diff -= steal;
+
+                    // Update DOM for victims
+                    if (sliders[i]) {
+                        sliders[i].value = probs[i];
+                        valDisplays[i].textContent = probs[i].toFixed(2);
+                    }
+                }
+            } else if (diff < 0) {
+                // We are giving back `-diff` to the very last slider (the pool)
+                probs[targetNode.states.length - 1] += (-diff);
+                if (sliders[targetNode.states.length - 1]) {
+                    sliders[targetNode.states.length - 1].value = probs[targetNode.states.length - 1];
+                    valDisplays[targetNode.states.length - 1].textContent = probs[targetNode.states.length - 1].toFixed(2);
+                }
+            }
+
+            sVal.textContent = val.toFixed(2);
+
+            targetNode.fullCustomCPT = null;
+            autoGenerateJointCPT(targetNode);
+            recalculateAll();
+            updatePropertiesPanel(targetNode, true);
+        });
+
+        sliders.push(slider);
+        valDisplays.push(sVal);
+
+        row.appendChild(sLabel);
+        row.appendChild(slider);
+        row.appendChild(sVal);
+        container.appendChild(row);
+    });
+
+    return container;
+}
+
+function updatePropertiesPanel(d, skipCptRender = false) {
+    document.getElementById('edit-node-name').value = d.label;
+
+    // Build incoming dependencies list
+    const parentLinks = links.filter(l => l.target.id === d.id);
+    const parentsCol = document.getElementById('parents-section');
+    const parentsList = document.getElementById('parents-list');
+
+    if (parentLinks.length > 0) {
+        parentsCol.style.display = 'block';
+        parentsList.innerHTML = '';
+        parentLinks.forEach(l => {
+            const row = document.createElement('div');
+            row.className = 'parent-row';
+            row.id = `parent-row-${l.source.id}`;
+            row.style.transition = 'background-color 0.5s';
+            row.style.padding = '10px 0';
+            row.style.borderBottom = '1px solid var(--border-color)';
+
+            const headerWrapper = document.createElement('div');
+            headerWrapper.style.display = 'flex';
+            headerWrapper.style.justifyContent = 'space-between';
+            headerWrapper.style.alignItems = 'center';
+
+            headerWrapper.innerHTML = `<span style="font-weight: bold; color: var(--accent);">${l.source.label}</span>`;
+
+            // Simple Logic applicable?
+            let isSimpleLogic = d.type === 'basic' && l.source.type === 'basic';
+
+            if (isSimpleLogic) {
+                const selectHtml = document.createElement('select');
+                selectHtml.innerHTML = `
+                    <option value="infers" ${l.type === 'infers' ? 'selected' : ''}>Infers</option>
+                    <option value="negates" ${l.type === 'negates' ? 'selected' : ''}>Negates</option>
+                    <option value="neutral" ${l.type === 'neutral' ? 'selected' : ''}>Neutral</option>
+                `;
+                selectHtml.addEventListener('change', (e) => {
+                    l.type = e.target.value;
+
+                    // Automatically update edgeCPT thresholds based on Logic type
+                    if (!d.edgeCPTs[l.source.id]) d.edgeCPTs[l.source.id] = [[], []];
+                    if (l.type === 'infers') {
+                        d.edgeCPTs[l.source.id][0] = [0.9, 0.1]; // P(C|P=T)
+                        d.edgeCPTs[l.source.id][1] = [0.1, 0.9]; // P(C|P=F)
+                    } else if (l.type === 'negates') {
+                        d.edgeCPTs[l.source.id][0] = [0.1, 0.9];
+                        d.edgeCPTs[l.source.id][1] = [0.9, 0.1];
+                    } else {
+                        d.edgeCPTs[l.source.id][0] = [0.5, 0.5];
+                        d.edgeCPTs[l.source.id][1] = [0.5, 0.5];
+                    }
+                    d.fullCustomCPT = null;
+                    autoGenerateJointCPT(d);
+                    recalculateAll();
+                    updateGraph();
+                    updatePropertiesPanel(d); // full re-render
+                });
+                headerWrapper.appendChild(selectHtml);
+            } else {
+                l.type = 'neutral';
+                // Don't override complex properties explicitly here, just let sliders handle it
+            }
+            row.appendChild(headerWrapper);
+
+            // Sliders for P(Child | Parent=State)
+            const sliderWrapper = document.createElement('div');
+            sliderWrapper.style.display = 'flex';
+            sliderWrapper.style.flexDirection = 'row'; // Stack sliders horizontally to prevent clipping
+            sliderWrapper.style.flexWrap = 'wrap'; // Break vertically if no space
+            sliderWrapper.style.gap = '10px';
+
+            l.source.states.forEach((pState, sIdx) => {
+                const sContainer = buildCascadingSliders(d, l.source.id, sIdx, `When ${l.source.label} is ${pState}:`);
+                sContainer.style.flex = "1 1 auto"; // Allow them to grow and wrap 
+                sliderWrapper.appendChild(sContainer);
+            });
+
+            row.appendChild(sliderWrapper);
+
+            parentsList.appendChild(row);
+        });
+    } else {
+        parentsCol.style.display = 'none';
+        parentsList.innerHTML = '';
+
+        // Root node needs prior sliders!
+        const priorContainer = buildCascadingSliders(d, 'prior', 0, `Base Prior Probability (No Parents):`);
+        parentsCol.style.display = 'block';
+        parentsList.appendChild(priorContainer);
+    }
+
+    // Auto Gen init if missing
+    if (!d.customCPT) autoGenerateJointCPT(d);
+
+    // Dynamic Evidence buttons
+    const evControls = document.getElementById('evidence-controls');
+    evControls.innerHTML = '';
+
+    const unkBtn = document.createElement('button');
+    unkBtn.className = `toggle-btn ${d.evidence === -1 ? 'active' : ''}`;
+    unkBtn.setAttribute('data-state', 'none');
+    unkBtn.textContent = 'Unknown';
+    evControls.appendChild(unkBtn);
+
+    d.states.forEach((stateName, idx) => {
+        const btn = document.createElement('button');
+        btn.className = `toggle-btn ${d.evidence === idx ? 'active' : ''}`;
+        btn.setAttribute('data-state', idx.toString());
+        btn.textContent = stateName;
+        evControls.appendChild(btn);
+    });
+
+    // Bind click events directly rather than globally to avoid stale closures
+    evControls.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            if (!selectedNode) return;
+            const state = e.target.getAttribute('data-state');
+
+            evControls.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+
+            if (state === "none") {
+                selectedNode.evidence = -1;
+            } else {
+                selectedNode.evidence = parseInt(state);
+            }
+
+            setEvidenceWasm(selectedNode.id, selectedNode.evidence);
+            recalculateAll();
+            updateGraph();
+        });
+    });
+
+    // Dynamic Marginals
+    const margContainer = document.getElementById('marginals-container');
+    margContainer.innerHTML = '';
+    if (d.marginals && d.marginals.length === d.states.length) {
+        d.states.forEach((stateName, idx) => {
+            const pVal = (d.marginals[idx] * 100).toFixed(1);
+            const colorClass = `color-${idx % 6}`;
+
+            const html = `
+                <div class="progress-bar-container">
+                    <div class="progress-label">
+                        <span>${stateName}</span>
+                        <span>${pVal}%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill ${colorClass}" style="width: ${pVal}%"></div>
+                    </div>
+                </div>
+            `;
+            margContainer.innerHTML += html;
+        });
     }
 }
 
 function setupEventListeners() {
-    document.getElementById('btn-add-node').addEventListener('click', () => {
-        addNodeToApp("New Var", width / 2, height / 2);
+    document.getElementById('btn-add-basic-node').addEventListener('click', () => {
+        addNodeToApp("New Binary", width / 2, height / 2, 'basic', ["True", "False"]);
     });
+
+    document.getElementById('btn-add-complex-node').addEventListener('click', () => {
+
+        // Standard window.prompt is used here, ensure focus is handled
+        setTimeout(() => {
+            const stateStr = prompt("Enter states, comma separated:", "Sunny, Rainy, Foggy");
+            if (stateStr) {
+                const states = stateStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+                if (states.length > 0) {
+                    addNodeToApp("New Complex", width / 2, height / 2, 'complex', states);
+                }
+            }
+        }, 10);
+    });
+
+    document.getElementById('edit-node-name').addEventListener('input', (e) => {
+        if (selectedNode) {
+            selectedNode.label = e.target.value;
+            updateGraph();
+        }
+    });
+
+    const btnAddEdge = document.getElementById('btn-add-edge');
+    if (btnAddEdge) {
+        btnAddEdge.addEventListener('click', () => {
+            isLinkingMode = !isLinkingMode;
+            linkingSourceNode = null;
+            btnAddEdge.classList.toggle('active', isLinkingMode);
+            btnAddEdge.textContent = isLinkingMode ? 'Cancel Edge' : 'Add Edge';
+            svg.classed('linking-mode', isLinkingMode);
+            updateGraph();
+        });
+    }
 
     document.getElementById('btn-clear').addEventListener('click', () => {
         nodes = [];
@@ -298,23 +797,131 @@ function setupEventListeners() {
         updateGraph();
     });
 
-    // Evidence toggles
-    document.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            if (!selectedNode) return;
-            const state = e.target.getAttribute('data-state');
-
-            if (state === "none") {
-                selectedNode.evidence = -1;
-            } else {
-                selectedNode.evidence = parseInt(state);
-            }
-
-            setEvidenceWasm(selectedNode.id, selectedNode.evidence);
-            recalculateAll();
-            updateGraph(); // UI update
-        });
+    // Modal event listeners
+    document.getElementById('btn-open-advanced-matrix').addEventListener('click', () => {
+        if (!selectedNode) return;
+        renderAdvancedMatrixModal(selectedNode);
     });
+
+    document.getElementById('btn-close-modal').addEventListener('click', () => {
+        document.getElementById('advanced-matrix-modal').classList.add('hidden');
+    });
+
+    document.getElementById('btn-cancel-modal').addEventListener('click', () => {
+        document.getElementById('advanced-matrix-modal').classList.add('hidden');
+    });
+
+    document.getElementById('btn-save-modal').addEventListener('click', () => {
+        if (!selectedNode) return;
+        saveAdvancedMatrixModal(selectedNode);
+    });
+}
+
+function renderAdvancedMatrixModal(node) {
+    const parentLinks = links.filter(l => l.target.id === node.id);
+    const grid = document.getElementById('modal-cpt-grid');
+    grid.innerHTML = '';
+
+    document.getElementById('modal-node-name').textContent = `${node.label} - Advanced Matrix`;
+    document.getElementById('modal-error-msg').classList.add('hidden');
+
+    // We render the existing fullCustomCPT or fallback to the independent ones (customCPT)
+    const renderCPT = node.fullCustomCPT ? node.fullCustomCPT : node.customCPT;
+
+    // Create header row
+    const headerRow = document.createElement('div');
+    headerRow.className = 'cpt-header-row';
+    const parentHeader = document.createElement('div');
+    parentHeader.style.fontWeight = 'bold';
+    parentHeader.textContent = parentLinks.length > 0 ? parentLinks.map(l => l.source.label).join(', ') : 'Prior';
+    headerRow.appendChild(parentHeader);
+
+    node.states.forEach(stateName => {
+        const stateHeader = document.createElement('div');
+        stateHeader.style.fontWeight = 'bold';
+        stateHeader.textContent = `P(${stateName})`;
+        headerRow.appendChild(stateHeader);
+    });
+    grid.appendChild(headerRow);
+
+    const parentCombinations = getParentStateCombinations(parentLinks);
+    const childNumStates = node.states.length;
+
+    parentCombinations.forEach((combo, comboIndex) => {
+        const row = document.createElement('div');
+        row.className = 'cpt-row modal-input-row';
+        row.style.flexWrap = 'nowrap'; // Ensure matrix stays as a grid internally
+        row.style.overflowX = 'auto';
+
+        const conditionDiv = document.createElement('div');
+        if (combo.length === 0) {
+            conditionDiv.textContent = 'Base';
+        } else {
+            conditionDiv.textContent = combo.map(ps => `${ps.parent.label}=${ps.stateName}`).join(', ');
+        }
+        conditionDiv.style.minWidth = "120px";
+        row.appendChild(conditionDiv);
+
+        for (let i = 0; i < childNumStates; i++) {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.01';
+            input.min = '0';
+            input.max = '1';
+            const cptIndex = comboIndex * childNumStates + i;
+            input.value = (renderCPT[cptIndex] || 0).toFixed(2);
+            input.dataset.comboIndex = comboIndex;
+            input.dataset.stateIndex = i;
+            row.appendChild(input);
+        }
+        grid.appendChild(row);
+    });
+
+    document.getElementById('advanced-matrix-modal').classList.remove('hidden');
+}
+
+function saveAdvancedMatrixModal(node) {
+    const childNumStates = node.states.length;
+    const grid = document.getElementById('modal-cpt-grid');
+    const rows = grid.querySelectorAll('.modal-input-row');
+
+    let allValid = true;
+    const newCPT = [];
+
+    rows.forEach(row => {
+        const inputs = Array.from(row.querySelectorAll('input'));
+        let sum = 0;
+        const tempVals = [];
+        inputs.forEach(input => {
+            let val = parseFloat(input.value);
+            if (isNaN(val)) val = 0;
+            sum += val;
+            tempVals.push(val);
+        });
+
+        // Check fuzzy math validation (sum around 1.0)
+        if (Math.abs(sum - 1.0) > 0.001) {
+            row.classList.add('row-error');
+            allValid = false;
+        } else {
+            row.classList.remove('row-error');
+            tempVals.forEach(v => newCPT.push(v));
+        }
+    });
+
+    if (!allValid) {
+        document.getElementById('modal-error-msg').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('modal-error-msg').classList.add('hidden');
+    node.fullCustomCPT = newCPT;
+    setCptApp(node.id, newCPT);
+    recalculateAll();
+    updateGraph();
+    updatePropertiesPanel(node);
+
+    document.getElementById('advanced-matrix-modal').classList.add('hidden');
 }
 
 // Start
